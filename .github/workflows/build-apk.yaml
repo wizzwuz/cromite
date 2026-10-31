@@ -5,28 +5,29 @@ on:
     inputs:
       arch:
         description: 'Target Android architecture'
-        type: choice
+        required: true
         default: 'arm64'
+        type: choice
         options:
           - arm64
           - arm
           - x64
       runner:
-        description: 'Runner label'
-        type: string
+        description: 'Runner label (ubuntu-24.04 or self-hosted)'
+        required: true
         default: 'ubuntu-24.04'
       debug:
-        description: 'Debug build?'
-        type: boolean
-        default: false
+        description: 'Debug build? (false = release build)'
+        required: true
+        default: 'false'
       fast_build:
-        description: 'Fast optimized build?'
-        type: boolean
-        default: true
+        description: 'Fast optimized build? (symbol_level=0, chrome_pgo_phase=0)'
+        required: true
+        default: 'true'
       continue_on_patch_error:
         description: 'Continue build if individual non-critical patch fails'
-        type: boolean
-        default: true
+        required: true
+        default: 'true'
 
 permissions:
   contents: read
@@ -96,7 +97,7 @@ jobs:
               export HOME=/home/lg/working_dir
               export PATH="${WORKSPACE}/chromium/src/third_party/llvm-build/Release+Asserts/bin:${WORKSPACE}/depot_tools:/usr/local/go/bin:${PATH}"
 
-              # Fix depot_tools Python bootstrap for gn
+              # Bootstrap depot_tools Python for gn
               mkdir -p "${WORKSPACE}/depot_tools"
               echo "../../../../../usr/bin" > "${WORKSPACE}/depot_tools/python3_bin_reldir.txt"
 
