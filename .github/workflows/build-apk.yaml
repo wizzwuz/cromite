@@ -1,6 +1,11 @@
 name: Build Cromite APK
 
 on:
+  push:
+    branches:
+      - master
+    paths:
+      - '.github/workflows/build-apk.yaml'
   workflow_dispatch:
     inputs:
       arch:
