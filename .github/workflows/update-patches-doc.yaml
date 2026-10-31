@@ -12,12 +12,6 @@ permissions:
 #  statuses: none
 
 on:
-  push:
-    branches:
-      - 'master'
-    paths:
-      - 'build/**'
-
   workflow_dispatch:
     inputs:
       rtag:

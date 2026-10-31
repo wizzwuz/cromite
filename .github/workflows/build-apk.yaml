@@ -1,11 +1,6 @@
 name: Build Cromite APK
 
 on:
-  push:
-    branches:
-      - master
-    paths:
-      - '.github/workflows/build-apk.yaml'
   workflow_dispatch:
     inputs:
       arch:
@@ -43,8 +38,8 @@ concurrency:
 
 jobs:
   build:
-    name: Build Android (${{ github.event.inputs.arch || 'arm64' }})
-    runs-on: ${{ github.event.inputs.runner || 'ubuntu-24.04' }}
+    name: Build Android (${{ inputs.arch || 'arm64' }})
+    runs-on: ${{ inputs.runner || 'ubuntu-24.04' }}
     timeout-minutes: 360
 
     steps:
@@ -52,7 +47,6 @@ jobs:
         run: |
           echo "=== Disk space before cleanup ==="
           df -h
-          
           sudo rm -rf /usr/share/dotnet || true
           sudo rm -rf /usr/local/lib/android || true
           sudo rm -rf /opt/ghc || true
@@ -61,7 +55,6 @@ jobs:
           sudo rm -rf /usr/local/share/powershell || true
           sudo rm -rf /usr/local/share/chromium || true
           sudo docker system prune -af || true
-          
           echo "=== Disk space after cleanup ==="
           df -h
 
@@ -84,129 +77,27 @@ jobs:
 
       - name: Build APK in Cromite Container
         env:
-          ANDROID_ARCH: ${{ github.event.inputs.arch || 'arm64' }}
-          TARGET_ISDEBUG: ${{ github.event.inputs.debug || 'false' }}
-          FAST_BUILD: ${{ github.event.inputs.fast_build || 'true' }}
-          CONTINUE_ON_PATCH_ERROR: ${{ github.event.inputs.continue_on_patch_error || 'true' }}
+          ANDROID_ARCH: ${{ inputs.arch || 'arm64' }}
+          TARGET_ISDEBUG: ${{ inputs.debug || 'false' }}
+          FAST_BUILD: ${{ inputs.fast_build || 'true' }}
+          CONTINUE_ON_PATCH_ERROR: ${{ inputs.continue_on_patch_error || 'true' }}
           VERSION: ${{ steps.get_version.outputs.version }}
         run: |
-          set -euo pipefail
-
-          echo "Pulling pre-synced Chromium container: uazo/chromium:${VERSION}"
+          echo "Pulling Chromium base container: uazo/chromium:${VERSION}"
           docker pull "uazo/chromium:${VERSION}"
 
           echo "Running build container..."
-          docker run --rm             -e ANDROID_ARCH="${ANDROID_ARCH}"             -e TARGET_ISDEBUG="${TARGET_ISDEBUG}"             -e FAST_BUILD="${FAST_BUILD}"             -e CONTINUE_ON_PATCH_ERROR="${CONTINUE_ON_PATCH_ERROR}"             -v "${GITHUB_WORKSPACE}:/home/lg/working_dir/cromite"             -v "${GITHUB_WORKSPACE}/out_apk:/out"             -w /home/lg/working_dir             "uazo/chromium:${VERSION}"             bash -c '
-              set -euo pipefail
-              export WORKSPACE=/home/lg/working_dir
-              export HOME=/home/lg/working_dir
-              export PATH="${WORKSPACE}/chromium/src/third_party/llvm-build/Release+Asserts/bin:${WORKSPACE}/depot_tools:/usr/local/go/bin:${PATH}"
-
-              # Bootstrap depot_tools Python for gn
-              mkdir -p "${WORKSPACE}/depot_tools"
-              echo "../../../../../usr/bin" > "${WORKSPACE}/depot_tools/python3_bin_reldir.txt"
-
-              cd "${WORKSPACE}/chromium/src"
-
-              echo "=== Step 1: Flattening nested submodules for patch application ==="
-              for subrepo in v8 third_party/devtools-frontend third_party/skia third_party/perfetto third_party/boringssl; do
-                if [ -d "${subrepo}" ]; then
-                  rm -rf "${subrepo}/.git" "${subrepo}/src/.git" || true
-                  cp -r "${subrepo}" "${subrepo}-tmp"
-                  git rm -rf "${subrepo}" >/dev/null 2>&1 || true
-                  git submodule deinit -f "${subrepo}" >/dev/null 2>&1 || true
-                  rm -rf "${subrepo}"
-                  mv "${subrepo}-tmp" "${subrepo}"
-                  git add -f "${subrepo}" >/dev/null 2>&1 || true
-                  git commit -m ":NOEXPORT: flatten ${subrepo}" >/dev/null 2>&1 || true
-                fi
-              done
-              git prune >/dev/null 2>&1 || true
-
-              echo "=== Step 2: Preparing Bare Browser bundled extension assets ==="
-              mkdir -p "${WORKSPACE}/chromium/src/chrome/browser/resources/bare"
-              if [ -f "${WORKSPACE}/cromite/build/uBlockOrigin-1.75.0.crx" ]; then
-                cp "${WORKSPACE}/cromite/build/uBlockOrigin-1.75.0.crx"                    "${WORKSPACE}/chromium/src/chrome/browser/resources/bare/ublock_origin.crx"
-                echo "Bundled uBlock Origin CRX copied successfully."
-              fi
-
-              echo "=== Step 3: Applying Cromite & Bare Browser patches ==="
-              PATCH_LIST="${WORKSPACE}/cromite/build/cromite_patches_list.txt"
-              PATCH_DIR="${WORKSPACE}/cromite/build/patches"
-
-              FAILED_PATCHES=()
-              APPLIED_COUNT=0
-
-              while IFS= read -r line || [ -n "$line" ]; do
-                patch_file="$(echo "$line" | sed "s/^[ 	]*//" | sed "s/[ 	]*$//")"
-                if [[ -z "$patch_file" || "$patch_file" =~ ^# ]]; then
-                  continue
-                fi
-
-                if [[ -f "${PATCH_DIR}/${patch_file}" ]]; then
-                  echo "--> Applying ${patch_file}..."
-                  REPL="0,/^---/s//FILE:$(basename "${patch_file}")
----/"
-                  if sed "$REPL" "${PATCH_DIR}/${patch_file}" | git am -3 >/dev/null 2>&1; then
-                    APPLIED_COUNT=$((APPLIED_COUNT + 1))
-                  else
-                    echo "::warning::Patch failed to apply: ${patch_file}"
-                    git am --abort >/dev/null 2>&1 || true
-                    FAILED_PATCHES+=("${patch_file}")
-                    if [ "${CONTINUE_ON_PATCH_ERROR}" != "true" ]; then
-                      echo "::error::Halting build because ${patch_file} failed to apply."
-                      exit 1
-                    fi
-                  fi
-                else
-                  echo "::warning::Patch file not found: ${patch_file}"
-                fi
-              done < "$PATCH_LIST"
-
-              echo "Patches applied successfully: ${APPLIED_COUNT}"
-              if [ ${#FAILED_PATCHES[@]} -gt 0 ]; then
-                echo "Non-critical failed patches: ${#FAILED_PATCHES[@]}"
-                printf "  - %s
-" "${FAILED_PATCHES[@]}"
-              fi
-
-              echo "=== Step 4: Configuring GN build arguments ==="
-              mkdir -p "out/${ANDROID_ARCH}"
-
-              GN_ARGS="target_os="android" target_cpu="${ANDROID_ARCH}" $(cat "${WORKSPACE}/cromite/build/cromite.gn_args")"
-
-              if [ "${FAST_BUILD}" = "true" ]; then
-                echo "Configuring fast optimized build (symbol_level=0, chrome_pgo_phase=0)..."
-                GN_ARGS="${GN_ARGS} is_official_build=false chrome_pgo_phase=0 symbol_level=0 blink_symbol_level=0"
-              fi
-
-              gn gen "out/${ANDROID_ARCH}" --args="${GN_ARGS}"
-
-              echo "=== Step 5: Compiling ChromePublic APK with Ninja ==="
-              python3 "${WORKSPACE}/depot_tools/siso.py" ninja -C "out/${ANDROID_ARCH}" chrome_public_apk --offline
-
-              echo "=== Step 6: Packaging APK ==="
-              APK_SRC="out/${ANDROID_ARCH}/apks/ChromePublic.apk"
-              if [ -f "$APK_SRC" ]; then
-                cp "$APK_SRC" "/out/ChromePublic-${ANDROID_ARCH}.apk"
-                echo "Successfully built /out/ChromePublic-${ANDROID_ARCH}.apk"
-                ls -lh "/out/ChromePublic-${ANDROID_ARCH}.apk"
-              else
-                echo "::error::Built APK not found at ${APK_SRC}"
-                find "out/${ANDROID_ARCH}/apks" -name "*.apk" || true
-                exit 1
-              fi
-            '
+          docker run --rm             -e ANDROID_ARCH="${ANDROID_ARCH}"             -e TARGET_ISDEBUG="${TARGET_ISDEBUG}"             -e FAST_BUILD="${FAST_BUILD}"             -e CONTINUE_ON_PATCH_ERROR="${CONTINUE_ON_PATCH_ERROR}"             -v "${GITHUB_WORKSPACE}:/home/lg/working_dir/cromite"             -v "${GITHUB_WORKSPACE}/out_apk:/out"             -w /home/lg/working_dir             "uazo/chromium:${VERSION}"             bash /home/lg/working_dir/cromite/build/build_in_docker.sh
 
       - name: Verify Built APK
         run: |
-          echo "Build output:"
+          echo "Build output directory contents:"
           ls -lh "${GITHUB_WORKSPACE}/out_apk"
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ChromePublic-${{ github.event.inputs.arch || 'arm64' }}-apk
+          name: ChromePublic-${{ inputs.arch || 'arm64' }}-apk
           path: out_apk/*.apk
           if-no-files-found: error
           retention-days: 14
