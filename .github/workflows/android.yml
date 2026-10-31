@@ -5,41 +5,28 @@ on:
     inputs:
       arch:
         description: 'Target Android architecture'
-        required: true
-        default: 'arm64'
         type: choice
+        default: 'arm64'
         options:
           - arm64
           - arm
           - x64
       runner:
-        description: 'Runner label (ubuntu-24.04, self-hosted, or large runner)'
-        required: true
+        description: 'Runner label'
+        type: string
         default: 'ubuntu-24.04'
       debug:
-        description: 'Debug build? (false = release build)'
-        required: true
-        default: 'false'
-        type: choice
-        options:
-          - 'false'
-          - 'true'
+        description: 'Debug build?'
+        type: boolean
+        default: false
       fast_build:
-        description: 'Fast build? (optimizes build time & RAM by omitting PGO/symbol overhead)'
-        required: true
-        default: 'true'
-        type: choice
-        options:
-          - 'true'
-          - 'false'
+        description: 'Fast optimized build?'
+        type: boolean
+        default: true
       continue_on_patch_error:
         description: 'Continue build if individual non-critical patch fails'
-        required: true
-        default: 'true'
-        type: choice
-        options:
-          - 'true'
-          - 'false'
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -60,7 +47,6 @@ jobs:
           echo "=== Disk space before cleanup ==="
           df -h
           
-          # Remove unused heavy runtimes & SDKs on GitHub-hosted runners
           sudo rm -rf /usr/share/dotnet || true
           sudo rm -rf /usr/local/lib/android || true
           sudo rm -rf /opt/ghc || true
@@ -110,7 +96,7 @@ jobs:
               export HOME=/home/lg/working_dir
               export PATH="${WORKSPACE}/chromium/src/third_party/llvm-build/Release+Asserts/bin:${WORKSPACE}/depot_tools:/usr/local/go/bin:${PATH}"
 
-              # Bootstrap depot_tools Python for gn
+              # Fix depot_tools Python bootstrap for gn
               mkdir -p "${WORKSPACE}/depot_tools"
               echo "../../../../../usr/bin" > "${WORKSPACE}/depot_tools/python3_bin_reldir.txt"
 
